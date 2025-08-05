@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Beoordelingsplatform</title>
+    <!-- Tailwind CSS voor een mooi, responsive ontwerp -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d0f10;
+            color: #e0e6ed;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        #player {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            border-radius: 0.75rem;
+        }
+        #timeline {
+            cursor: pointer;
+            width: 100%;
+            height: 40px;
+            background-color: #2c2f35;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+        }
+        .comment-item {
+            position: relative;
+            background-color: #1a1c21;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            border: 1px solid transparent;
+        }
+        .comment-item:hover {
+            border-color: #4a4f58;
+            transform: translateY(-2px);
+        }
+        .highlighted {
+            border-color: #4f46e5;
+            box-shadow: 0 0 10px rgba(79, 70, 229, 0.5);
+        }
+        .form-input {
+            background-color: #1a1c21;
+            border: 1px solid #4a4f58;
+            color: #e0e6ed;
+            transition: border-color 0.2s ease;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.3);
+        }
+        .btn {
+            background-color: #4f46e5;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s ease;
+        }
+        .btn:hover {
+            background-color: #4338ca;
+        }
+        .btn-secondary {
+            background-color: #374151;
+            color: #d1d5db;
+        }
+        .btn-secondary:hover {
+            background-color: #4b5563;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="container mx-auto">
+        <h1 class="text-3xl font-bold mb-6 text-center">Video Beoordelingsplatform</h1>
+        
+        <!-- Video URL Input -->
+        <div class="mb-6 p-4 bg-gray-800 rounded-xl shadow-lg">
+            <label for="videoUrlInput" class="block text-gray-400 mb-2">YouTube Video ID of URL:</label>
+            <div class="flex space-x-2">
+                <input type="text" id="videoUrlInput" value="jfKfPfySgOY" placeholder="Voer hier de YouTube Video ID of URL in..." class="form-input flex-grow rounded-lg p-2">
+                <button onclick="loadVideo()" class="btn">Laad Video</button>
+            </div>
+        </div>
+
+        <!-- Video Player and Controls -->
+        <div class="relative w-full mb-6 rounded-xl overflow-hidden">
+            <div id="player" class="z-10"></div>
+        </div>
+
+        <!-- Timeline and Comment Section -->
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+            <h2 class="text-2xl font-bold mb-4">Tijdlijn en Opmerkingen</h2>
+
+            <!-- Timeline Canvas -->
+            <canvas id="timeline" class="mb-4"></canvas>
+
+            <!-- New Comment Form -->
+            <div class="mb-6 p-4 bg-gray-900 rounded-lg">
+                <h3 class="text-xl font-semibold mb-2">Voeg een opmerking toe</h3>
+                <div class="flex items-center space-x-4 mb-2 text-gray-400">
+                    <span class="text-sm">Huidige tijd: </span>
+                    <span id="currentTimeDisplay" class="font-mono text-lg text-white">00:00</span>
+                </div>
+                <textarea id="commentText" class="form-input w-full p-2 rounded-lg resize-none" rows="3" placeholder="Typ je opmerking hier..."></textarea>
+                <div class="mt-4 flex justify-end">
+                    <button onclick="addComment()" class="btn">Opmerking toevoegen</button>
+                </div>
+            </div>
+
+            <!-- Comment List -->
+            <div id="commentList" class="space-y-4">
+                <!-- Comments will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Export/Import Actions -->
+        <div class="mt-6 flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+            <button onclick="exportComments()" class="btn btn-secondary flex-1">Exporteer Opmerkingen</button>
+            <div class="flex-1 flex space-x-2">
+                <label for="importFileInput" class="btn btn-secondary flex-grow text-center cursor-pointer">Importeer Opmerkingen</label>
+                <input type="file" id="importFileInput" accept=".json" class="hidden">
+            </div>
+        </div>
+    </div>
+
+    <!-- YouTube IFrame Player API -->
+    <script>
+        var player;
+        var comments = [];
+        var timelineCanvas = document.getElementById('timeline');
+        var ctx = timelineCanvas.getContext('2d');
+        var isDragging = false;
+        var updateInterval;
+        var highlightedCommentId = null;
+
+        // Load the YouTube IFrame Player API asynchronously.
+        var tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        var firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+        // This function is called when the API is ready.
+        function onYouTubeIframeAPIReady() {
+            // Get the video ID from the input and create the player
+            loadVideo();
+        }
+
+        // Function to extract video ID from a URL
+        function extractVideoId(url) {
+            // Regex to match various YouTube URL formats
+            const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+            const match = url.match(regex);
+            return (match && match[1]) ? match[1] : url;
+        }
+
+        // Function to load a new video
+        function loadVideo() {
+            const videoUrlInput = document.getElementById('videoUrlInput');
+            const videoId = extractVideoId(videoUrlInput.value);
+
+            if (player) {
+                player.loadVideoById(videoId);
+            } else {
+                player = new YT.Player('player', {
+                    height: '100%',
+                    width: '100%',
+                    videoId: videoId,
+                    playerVars: {
+                        'playsinline': 1
+                    },
+                    events: {
+                        'onReady': onPlayerReady,
+                        'onStateChange': onPlayerStateChange
+                    }
+                });
+            }
+            comments = []; // Clear comments for new video
+            renderUI();
+        }
+
+        // The API will call this function when the video player is ready.
+        function onPlayerReady(event) {
+            // Start the interval to update the timeline and time display
+            updateInterval = setInterval(updateUI, 250);
+            
+            // Setup event listeners for timeline scrubbing
+            timelineCanvas.addEventListener('mousedown', startDrag);
+            timelineCanvas.addEventListener('mousemove', drag);
+            timelineCanvas.addEventListener('mouseup', endDrag);
+            timelineCanvas.addEventListener('mouseleave', endDrag);
+            
+            // Initial render
+            renderUI();
+        }
+
+        // The API calls this function when the player's state changes.
+        function onPlayerStateChange(event) {
+            if (event.data == YT.PlayerState.PLAYING) {
+                // When playing, the interval handles updates
+            } else {
+                // When paused or stopped, update once to ensure timeline is correct
+                updateUI();
+            }
+        }
+
+        // Main function to update the UI
+        function updateUI() {
+            if (!player || !player.getDuration) return;
+
+            const currentTime = player.getCurrentTime();
+            const duration = player.getDuration();
+            
+            // Highlight the comment near the current time
+            highlightComment(currentTime);
+            
+            // Update time display
+            document.getElementById('currentTimeDisplay').textContent = formatTime(currentTime);
+            
+            // Render the timeline
+            renderTimeline(currentTime, duration);
+        }
+        
+        // Render all parts of the UI
+        function renderUI() {
+            renderComments();
+            // Initial render of the timeline with current time and duration
+            renderTimeline(player?.getCurrentTime() || 0, player?.getDuration() || 0);
+        }
+
+        // Function to add a new comment
+        function addComment() {
+            const commentText = document.getElementById('commentText').value.trim();
+            if (!player || !commentText) return;
+
+            const currentTime = player.getCurrentTime();
+            
+            comments.push({
+                id: Date.now(),
+                time: currentTime,
+                text: commentText
+            });
+
+            // Sort comments by time
+            comments.sort((a, b) => a.time - b.time);
+
+            document.getElementById('commentText').value = ''; // Clear the textarea
+            renderUI();
+        }
+
+        // Function to render the comments in the list
+        function renderComments() {
+            const commentList = document.getElementById('commentList');
+            commentList.innerHTML = ''; // Clear existing comments
+
+            comments.forEach(comment => {
+                const commentDiv = document.createElement('div');
+                commentDiv.className = `comment-item cursor-pointer flex flex-col md:flex-row md:items-start space-y-2 md:space-y-0 md:space-x-4`;
+                commentDiv.setAttribute('data-comment-id', comment.id);
+                commentDiv.innerHTML = `
+                    <div class="flex-shrink-0 text-sm font-mono text-gray-400 w-20 md:w-24">
+                        ${formatTime(comment.time)}
+                    </div>
+                    <div class="flex-grow">
+                        <p class="text-sm">${comment.text}</p>
+                    </div>
+                `;
+                
+                // Add click event to jump to comment time
+                commentDiv.addEventListener('click', () => {
+                    player.seekTo(comment.time, true);
+                    player.playVideo();
+                });
+                
+                commentList.appendChild(commentDiv);
+            });
+        }
+        
+        // Function to highlight a comment if the current time is close
+        function highlightComment(currentTime) {
+            const activeComment = comments.find(c => Math.abs(c.time - currentTime) < 0.5); // 0.5 second tolerance
+            const activeCommentId = activeComment?.id || null;
+
+            if (highlightedCommentId !== activeCommentId) {
+                // Remove highlight from previous comment
+                if (highlightedCommentId) {
+                    const prevCommentElement = document.querySelector(`[data-comment-id="${highlightedCommentId}"]`);
+                    if (prevCommentElement) {
+                        prevCommentElement.classList.remove('highlighted');
+                    }
+                }
+
+                // Add highlight to new active comment
+                if (activeCommentId) {
+                    const currentCommentElement = document.querySelector(`[data-comment-id="${activeCommentId}"]`);
+                    if (currentCommentElement) {
+                        currentCommentElement.classList.add('highlighted');
+                    }
+                }
+
+                highlightedCommentId = activeCommentId;
+            }
+        }
+        
+        // Function to render the timeline
+        function renderTimeline(currentTime, duration) {
+            if (duration <= 0) {
+                timelineCanvas.width = timelineCanvas.offsetWidth;
+                timelineCanvas.height = timelineCanvas.offsetHeight;
+                ctx.clearRect(0, 0, timelineCanvas.width, timelineCanvas.height);
+                return;
+            }
+            
+            const canvasWidth = timelineCanvas.offsetWidth;
+            const canvasHeight = timelineCanvas.offsetHeight;
+            timelineCanvas.width = canvasWidth;
+            timelineCanvas.height = canvasHeight;
+
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // Draw the main timeline bar
+            ctx.fillStyle = '#4a4f58';
+            ctx.fillRect(0, canvasHeight / 2 - 2, canvasWidth, 4);
+
+            // Draw comment markers
+            comments.forEach(comment => {
+                const x = (comment.time / duration) * canvasWidth;
+                ctx.fillStyle = '#4f46e5';
+                ctx.beginPath();
+                ctx.arc(x, canvasHeight / 2, 5, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // Draw the current time scrubber
+            const scrubberX = (currentTime / duration) * canvasWidth;
+            ctx.fillStyle = '#fef3c7'; // Gold color for visibility
+            ctx.beginPath();
+            ctx.moveTo(scrubberX, 0);
+            ctx.lineTo(scrubberX, canvasHeight);
+            ctx.strokeStyle = '#fef3c7';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Functions for timeline scrubbing
+        function startDrag(event) {
+            isDragging = true;
+            drag(event); // Handle initial click
+        }
+        
+        function drag(event) {
+            if (isDragging && player && player.getDuration) {
+                const rect = timelineCanvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const newTime = (x / rect.width) * player.getDuration();
+                player.seekTo(newTime, true);
+                renderTimeline(newTime, player.getDuration()); // Instant visual update
+            }
+        }
+        
+        function endDrag() {
+            isDragging = false;
+        }
+
+        // Function to format time in MM:SS format
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return '00:00';
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.floor(seconds % 60);
+            return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+        }
+
+        // Function to export comments to a JSON file
+        function exportComments() {
+            if (!player || !player.getVideoUrl) {
+                console.error("Geen video geladen om opmerkingen van te exporteren.");
+                return;
+            }
+
+            const videoId = player.getVideoUrl().split('v=')[1]?.split('&')[0] || document.getElementById('videoUrlInput').value;
+            const data = {
+                videoId: videoId,
+                comments: comments
+            };
+            const jsonString = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `video-beoordeling_${videoId}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Event listener for the file import
+        document.getElementById('importFileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        if (importedData.videoId && importedData.comments) {
+                            document.getElementById('videoUrlInput').value = importedData.videoId;
+                            loadVideo();
+                            comments = importedData.comments;
+                            renderUI();
+                        } else {
+                            console.error("Ongeldig JSON-formaat voor import.");
+                        }
+                    } catch (error) {
+                        console.error("Fout bij het parsen van het JSON-bestand:", error);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+    </script>
+</body>
+</html>
